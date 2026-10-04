@@ -1,10 +1,12 @@
 // sidepanel.js - Controller for Encode Companion Side Panel
 import { forgeFlashcards } from '../lib/forge.js';
 import { AnkiConnectClient } from '../lib/anki.js';
-import { formatForRemNote } from '../lib/wozniak.js';
+import { formatForRemNote, sanitizeDeck } from '../lib/wozniak.js';
 
 let currentDeckData = null;
 let activeSourceInfo = { type: 'webpage', title: '', url: '' };
+let isRecording = false;
+let speechRecognizer = null;
 const anki = new AnkiConnectClient();
 
 // DOM Elements
@@ -13,6 +15,9 @@ const ankiStatusText = document.getElementById('anki-status-text');
 const btnGrabContext = document.getElementById('btn-grab-context');
 const btnGrabText = document.getElementById('btn-grab-text');
 const btnGrabSelection = document.getElementById('btn-grab-selection');
+const btnMic = document.getElementById('btn-mic');
+const micIcon = document.getElementById('mic-icon');
+const btnCopyGeminiPrompt = document.getElementById('btn-copy-gemini-prompt');
 const sourceIndicator = document.getElementById('capture-source-indicator');
 const sourceTypePill = document.getElementById('source-type-pill');
 const sourceTitleDisplay = document.getElementById('source-title-display');
@@ -29,6 +34,7 @@ const resultsView = document.getElementById('results-view');
 const deckTopicTitle = document.getElementById('deck-topic-title');
 const deckAuditStats = document.getElementById('deck-audit-stats');
 const cardsContainer = document.getElementById('cards-container');
+const btnAddCard = document.getElementById('btn-add-card');
 const btnPushAnki = document.getElementById('btn-push-anki');
 const btnCopyRemnote = document.getElementById('btn-copy-remnote');
 const btnCopyJson = document.getElementById('btn-copy-json');
@@ -49,6 +55,7 @@ async function init() {
   await checkAnkiStatus();
   await inspectActiveTab();
   await checkPendingCapture();
+  await checkLastForgedDeck();
   setupEventListeners();
 }
 
@@ -99,8 +106,14 @@ async function checkPendingCapture() {
     inputText.value = pendingCapture.text;
     updateWordCount();
     setSourceIndicator(pendingCapture.title || 'Context Capture', 'Captured');
-    // Clear once consumed
     await chrome.storage.local.remove('pendingCapture');
+  }
+}
+
+async function checkLastForgedDeck() {
+  const { lastForgedDeck } = await chrome.storage.local.get('lastForgedDeck');
+  if (lastForgedDeck && lastForgedDeck.cards && lastForgedDeck.cards.length > 0) {
+    renderCards(lastForgedDeck);
   }
 }
 
@@ -142,7 +155,6 @@ async function grabFromCurrentTab(selectionOnly = false) {
     return;
   }
 
-  // Ensure content scripts are injected if page was already loaded
   const fileToInject = tab.url.includes('docs.google.com/presentation')
     ? 'content/google-slides.js'
     : tab.url.includes('gemini.google.com')
@@ -150,7 +162,6 @@ async function grabFromCurrentTab(selectionOnly = false) {
     : 'content/general.js';
 
   try {
-    // Try sending message first
     const action = selectionOnly ? 'extract_content' : (
       tab.url.includes('docs.google.com/presentation') ? 'extract_google_slides' :
       tab.url.includes('gemini.google.com') ? 'extract_gemini' : 'extract_content'
@@ -160,7 +171,6 @@ async function grabFromCurrentTab(selectionOnly = false) {
     try {
       res = await chrome.tabs.sendMessage(tab.id, { action });
     } catch {
-      // Content script not loaded yet, inject it on the fly
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         files: [fileToInject]
@@ -182,11 +192,70 @@ async function grabFromCurrentTab(selectionOnly = false) {
   }
 }
 
-// --- Card Rendering ---
+// --- Web Speech API Dictation ---
+function setupSpeechRecognition() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    btnMic.title = 'Speech recognition not supported in this browser';
+    btnMic.disabled = true;
+    return;
+  }
+
+  speechRecognizer = new SpeechRecognition();
+  speechRecognizer.continuous = true;
+  speechRecognizer.interimResults = true;
+
+  speechRecognizer.onstart = () => {
+    isRecording = true;
+    micIcon.textContent = '🔴';
+    btnMic.classList.add('mic-active');
+  };
+
+  speechRecognizer.onresult = (event) => {
+    let transcript = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript;
+    }
+    if (transcript) {
+      inputText.value += (inputText.value ? ' ' : '') + transcript;
+      updateWordCount();
+    }
+  };
+
+  speechRecognizer.onerror = (e) => {
+    console.warn('Speech recognition error:', e.error);
+    stopRecording();
+  };
+
+  speechRecognizer.onend = () => {
+    stopRecording();
+  };
+}
+
+function toggleRecording() {
+  if (isRecording) {
+    stopRecording();
+  } else {
+    try {
+      speechRecognizer.start();
+    } catch (e) {
+      console.warn('Could not start recognition:', e);
+    }
+  }
+}
+
+function stopRecording() {
+  isRecording = false;
+  micIcon.textContent = '🎙️';
+  btnMic.classList.remove('mic-active');
+  try { speechRecognizer.stop(); } catch {}
+}
+
+// --- Card Rendering with Inline Editing ---
 function renderCards(deck) {
   currentDeckData = deck;
   deckTopicTitle.textContent = deck.topic;
-  deckAuditStats.textContent = `${deck.cards.length} cards · ${deck.stats.clean} clean · ${deck.stats.warnings} flagged`;
+  updateAuditDisplay();
 
   cardsContainer.innerHTML = '';
 
@@ -194,34 +263,59 @@ function renderCards(deck) {
     const cardEl = document.createElement('div');
     cardEl.className = 'card-item';
 
+    const cardHeader = document.createElement('div');
+    cardHeader.className = 'card-item-header';
+
     const typeTag = document.createElement('span');
     typeTag.className = `card-type-tag card-type-${card.type}`;
     typeTag.textContent = card.type;
 
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'card-del-btn';
+    deleteBtn.textContent = '✕';
+    deleteBtn.title = 'Remove this card';
+    deleteBtn.addEventListener('click', () => {
+      deck.cards.splice(idx, 1);
+      renderCards(deck);
+    });
+
+    cardHeader.appendChild(typeTag);
+    cardHeader.appendChild(deleteBtn);
+    cardEl.appendChild(cardHeader);
+
+    // Front (Editable)
     const frontEl = document.createElement('div');
-    frontEl.className = 'card-front';
-
-    // Highlight clozes visually
-    if (card.type === 'cloze') {
-      frontEl.innerHTML = card.front.replace(/\{\{c\d+::(.*?)\}\}/g, '<span class="cloze-highlight">[$1]</span>');
-    } else {
-      frontEl.textContent = `${idx + 1}. ${card.front}`;
-    }
-
-    cardEl.appendChild(typeTag);
+    frontEl.className = 'card-front editable-field';
+    frontEl.contentEditable = 'true';
+    frontEl.textContent = card.front;
+    frontEl.addEventListener('input', () => {
+      card.front = frontEl.textContent.trim();
+      updateAuditDisplay();
+    });
     cardEl.appendChild(frontEl);
 
-    if (card.back) {
+    // Back (Editable if present)
+    if (card.back !== undefined) {
       const backEl = document.createElement('div');
-      backEl.className = 'card-back';
+      backEl.className = 'card-back editable-field';
+      backEl.contentEditable = 'true';
       backEl.textContent = card.back;
+      backEl.addEventListener('input', () => {
+        card.back = backEl.textContent.trim();
+        updateAuditDisplay();
+      });
       cardEl.appendChild(backEl);
     }
 
+    // Trap (Editable if present)
     if (card.trap) {
       const trapEl = document.createElement('div');
-      trapEl.className = 'card-trap';
-      trapEl.innerHTML = `⚠️ <b>Lookalike Trap:</b> ${card.trap}`;
+      trapEl.className = 'card-trap editable-field';
+      trapEl.contentEditable = 'true';
+      trapEl.textContent = `Trap: ${card.trap}`;
+      trapEl.addEventListener('input', () => {
+        card.trap = trapEl.textContent.replace(/^Trap:\s*/, '').trim();
+      });
       cardEl.appendChild(trapEl);
     }
 
@@ -231,14 +325,32 @@ function renderCards(deck) {
   resultsView.classList.remove('hidden');
 }
 
+function updateAuditDisplay() {
+  if (!currentDeckData) return;
+  const { stats } = sanitizeDeck(currentDeckData.cards);
+  deckAuditStats.textContent = `${currentDeckData.cards.length} cards · ${stats.clean} clean · ${stats.warnings} leeches/warnings`;
+}
+
 // --- Event Listeners ---
 function setupEventListeners() {
+  setupSpeechRecognition();
+
   inputText.addEventListener('input', updateWordCount);
 
   btnGrabContext.addEventListener('click', () => grabFromCurrentTab(false));
   btnGrabSelection.addEventListener('click', () => grabFromCurrentTab(true));
+  btnMic.addEventListener('click', toggleRecording);
 
   btnDismissError.addEventListener('click', hideError);
+
+  // Copy Gemini Socratic prompt
+  btnCopyGeminiPrompt.addEventListener('click', async () => {
+    const text = inputText.value.trim();
+    const prompt = `I am studying this lecture / slide material:\n\n---\n${text || activeSourceInfo.title || 'Selected concepts'}\n---\n\nPlease explain:\n1. The core underlying causal mechanism (why does it work this way step-by-step?).\n2. One intuitive real-world analogy.\n3. The most common student misconception or lookalike confusion and why it fails.`;
+
+    await navigator.clipboard.writeText(prompt);
+    showReceipt('💡 Copied Socratic Gemini prompt to clipboard!');
+  });
 
   // Forge button
   btnForge.addEventListener('click', async () => {
@@ -263,6 +375,7 @@ function setupEventListeners() {
         apiKey: geminiApiKey,
         cardStyle: selectedStyle
       });
+      await chrome.storage.local.set({ lastForgedDeck: deck });
       renderCards(deck);
     } catch (err) {
       showError(err.message);
@@ -270,6 +383,18 @@ function setupEventListeners() {
       loadingState.classList.add('hidden');
       btnForge.disabled = false;
     }
+  });
+
+  // Add blank card
+  btnAddCard.addEventListener('click', () => {
+    if (!currentDeckData) return;
+    currentDeckData.cards.push({
+      type: 'cloze',
+      front: 'Concept {{c1::key fact}} prompt',
+      back: '',
+      trap: ''
+    });
+    renderCards(currentDeckData);
   });
 
   // Push to Anki
@@ -344,5 +469,4 @@ function setupEventListeners() {
   });
 }
 
-// Start
 document.addEventListener('DOMContentLoaded', init);

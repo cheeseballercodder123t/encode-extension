@@ -37,6 +37,9 @@
         <button id="btn-grab-selection" class="btn btn-ghost capture-btn" title="Grab highlighted text">
           <span class="btn-icon">✂️</span> Selection
         </button>
+        <button id="btn-mic" class="btn btn-ghost icon-only-btn" title="Dictate notes with microphone">
+          <span id="mic-icon">🎙️</span>
+        </button>
       </div>
       <div id="capture-source-indicator" class="source-indicator hidden">
         <span id="source-type-pill" class="pill">Page</span>
@@ -44,13 +47,18 @@
       </div>
     </section>
 
-    <!-- Content Workspace -->
+    <!-- Study Material Workspace -->
     <section class="section workbench">
       <div class="section-label-row">
         <label for="input-text" class="section-label">STUDY MATERIAL</label>
-        <span id="word-count" class="meta-label">0 words</span>
+        <div class="workbench-actions">
+          <button id="btn-copy-gemini-prompt" class="pill-btn" title="Copy slide text + Socratic prompt for Gemini">
+            💡 Prompt for Gemini
+          </button>
+          <span id="word-count" class="meta-label">0 words</span>
+        </div>
       </div>
-      <textarea id="input-text" placeholder="Paste notes, slides, or click 'Grab' above to auto-extract from Google Slides or Gemini..." rows="6"></textarea>
+      <textarea id="input-text" placeholder="Paste notes, slides, or click 'Grab' above to auto-extract from Google Slides or Gemini..." rows="5"></textarea>
 
       <div class="forge-controls">
         <div class="style-selector">
@@ -101,6 +109,9 @@
           <div id="deck-audit-stats" class="audit-stats">0 cards · 0 leeches</div>
         </div>
         <div class="results-actions">
+          <button id="btn-add-card" class="btn btn-ghost btn-sm" title="Add blank card">
+            + Add Card
+          </button>
           <button id="btn-open-deepencode" class="btn btn-ghost btn-sm" title="Open in DeepEncode web studio">
             ↗ Full Studio
           </button>
