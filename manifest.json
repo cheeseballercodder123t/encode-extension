@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Encode Companion — 1-Click Slides & Gemini to Anki",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Zero-friction flashcard companion for DeepEncode: Capture Google Slides, Gemini chat, or any webpage into Anki & RemNote.",
   "icons": {
     "16": "icons/icon-16.png",

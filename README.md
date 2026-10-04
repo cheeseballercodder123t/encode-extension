@@ -13,13 +13,14 @@ Chatting with Gemini about your lecture slides is natural and fast. But turning 
 3. Reformatting cards to avoid bloated paragraphs
 4. Manually organizing decks
 
-**Encode Companion** eliminates this entire friction loop by living directly in Chrome's **Side Panel**:
-* **One-Click Slide Capture:** Detects Google Slides and pulls slide text and speaker notes into the side panel with one click.
-* **One-Click Gemini Capture:** Detects Gemini Chat (`gemini.google.com`) and pulls the latest explanation or conversation turn.
+**Encode Companion** eliminates this entire friction loop by living directly in Chrome's **Side Panel** and right inside your study tabs:
+* **In-Page Gemini Integration:** Injects a glowing `[⚡ Encode to Anki]` button directly beside every Gemini model answer, plus an in-chat Socratic prompt assistant.
+* **Google Slides Companion Widget:** Floating overlay pill on slides with `[⚡ Encode Slide to Anki]` (shortcut `Alt+S`), DeepEncode launcher, and slide index tracker.
 * **Wozniak 20-Rule Quality Enforcement:** Sanitizes generated cards against the 20-word ceiling and 1-idea rule so you never create review leeches.
-* **Direct Anki Push:** Pushes cards directly into your Anki desktop collection via AnkiConnect without download dialogs.
+* **Direct Anki Push & Native .txt TSV:** Pushes cards directly into your Anki desktop collection via AnkiConnect, or downloads a 1-click importable `.txt` deck with zero add-ons required.
 * **RemNote Power Syntax:** Copies cards formatted with `::`, `>>`, and `{{clozes}}`.
-* **DeepEncode Studio Bridge:** Send captured materials into the DeepEncode studio for full interactive workouts.
+* **Voice Active Recall:** Integrated speech dictation (`🎙️`) for verbal recall drills right in your browser sidebar.
+* **DeepEncode Studio Bridge:** Send captured materials into the DeepEncode studio with `?source=...&auto=forge` for full interactive Socratic workouts.
 
 ---
 
@@ -64,6 +65,7 @@ encode-extension/
 │   ├── sidepanel.css          # DeepEncode styling & animations
 │   └── sidepanel.js           # Controller: capture, forge, export
 ├── lib/
+│   ├── audio.js               # Web Audio API sound feedback
 │   ├── wozniak.js             # 20-word ceiling, 1-idea rule, RemNote formatting
 │   ├── anki.js                # AnkiConnect API client & duplicate checker
 │   └── forge.js               # Flashcard generation engine (Gemini / window.ai)

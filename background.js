@@ -29,7 +29,7 @@ chrome.runtime.onInstalled.addListener(async () => {
     });
     chrome.contextMenus.create({
       id: 'encode-page',
-      title: '⚡ Encode this entire page / slide',
+      title: '⚡ Encode this entire slide / page',
       contexts: ['page']
     });
   });
@@ -89,8 +89,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           await chrome.sidePanel.open({ windowId: sender.tab.windowId });
           sendResponse({ success: true });
         } else {
-          sendResponse({ success: false, error: 'No active window found' });
+          const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (activeTab && activeTab.windowId) {
+            await chrome.sidePanel.open({ windowId: activeTab.windowId });
+            sendResponse({ success: true });
+          } else {
+            sendResponse({ success: false, error: 'No active window found' });
+          }
         }
+        return;
+      }
+
+      if (message.action === 'open_deepencode') {
+        const { deepEncodeUrl = 'http://localhost:3000' } = await chrome.storage.local.get('deepEncodeUrl');
+        const text = message.text ? encodeURIComponent(message.text) : '';
+        const auto = message.auto ? `&auto=${encodeURIComponent(message.auto)}` : '';
+        const url = `${deepEncodeUrl}${text ? `?source=${text}` : ''}${auto}`;
+        await chrome.tabs.create({ url });
+        sendResponse({ success: true, url });
         return;
       }
 
@@ -133,5 +149,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
 
-        // 2. Push to Anki
-        const targetDeck = `${defaultDeck}::${deck.topic.replace(/\s+/g, '_')}`;\n        const pushResult = await anki.pushCards(targetDeck, deck.cards);\n\n        // Also save to recent storage so side panel shows it\n        await chrome.storage.local.set({ lastForgedDeck: deck });\n\n        sendResponse({\n          success: true,\n          added: pushResult.added,\n          skipped: pushResult.skipped,\n          deck: targetDeck,\n          topic: deck.topic\n        });\n        return;\n      }\n\n      sendResponse({ status: 'unhandled_action' });\n    } catch (err) {\n      console.error('Error in background listener:', err);\n      sendResponse({ success: false, error: err.message || String(err) });\n    }\n  })();\n\n  return true;\n});\n
+        // Always save to storage so cards are safe even if Anki is not open
+        await chrome.storage.local.set({ lastForgedDeck: deck });
+
+        // 2. Push to Anki if reachable
+        const targetDeck = `${defaultDeck}::${deck.topic.replace(/\s+/g, '_')}`;
+        let pushResult = { added: 0, skipped: 0 };
+        let ankiOffline = false;
+
+        try {
+          pushResult = await anki.pushCards(targetDeck, deck.cards);
+        } catch (ankiErr) {
+          console.warn('AnkiConnect was unreachable during quick push:', ankiErr);
+          ankiOffline = true;
+        }
+
+        sendResponse({
+          success: true,
+          added: pushResult.added || 0,
+          skipped: pushResult.skipped || 0,
+          ankiOffline,
+          deck: targetDeck,
+          topic: deck.topic,
+          cardCount: deck.cards.length
+        });
+        return;
+      }
+
+      sendResponse({ status: 'unhandled_action' });
+    } catch (err) {
+      console.error('Error in background listener:', err);
+      sendResponse({ success: false, error: err.message || String(err) });
+    }
+  })();
+
+  return true;
+});
