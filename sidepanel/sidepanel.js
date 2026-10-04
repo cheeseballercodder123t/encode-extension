@@ -2,6 +2,7 @@
 import { forgeFlashcards } from '../lib/forge.js';
 import { AnkiConnectClient } from '../lib/anki.js';
 import { formatForRemNote, sanitizeDeck } from '../lib/wozniak.js';
+import { sound } from '../lib/audio.js';
 
 let currentDeckData = null;
 let activeSourceInfo = { type: 'webpage', title: '', url: '' };
@@ -36,6 +37,7 @@ const deckAuditStats = document.getElementById('deck-audit-stats');
 const cardsContainer = document.getElementById('cards-container');
 const btnAddCard = document.getElementById('btn-add-card');
 const btnPushAnki = document.getElementById('btn-push-anki');
+const btnDownloadTxt = document.getElementById('btn-download-txt');
 const btnCopyRemnote = document.getElementById('btn-copy-remnote');
 const btnCopyJson = document.getElementById('btn-copy-json');
 const btnOpenDeepEncode = document.getElementById('btn-open-deepencode');
@@ -346,7 +348,16 @@ function setupEventListeners() {
   // Copy Gemini Socratic prompt
   btnCopyGeminiPrompt.addEventListener('click', async () => {
     const text = inputText.value.trim();
-    const prompt = `I am studying this lecture / slide material:\n\n---\n${text || activeSourceInfo.title || 'Selected concepts'}\n---\n\nPlease explain:\n1. The core underlying causal mechanism (why does it work this way step-by-step?).\n2. One intuitive real-world analogy.\n3. The most common student misconception or lookalike confusion and why it fails.`;
+    const prompt = `I am studying this lecture / slide material:
+
+---
+${text || activeSourceInfo.title || 'Selected concepts'}
+---
+
+Please explain:
+1. The core underlying causal mechanism (why does it work this way step-by-step?).
+2. One intuitive real-world analogy.
+3. The most common student misconception or lookalike confusion and why it fails.`;
 
     await navigator.clipboard.writeText(prompt);
     showReceipt('💡 Copied Socratic Gemini prompt to clipboard!');
@@ -357,10 +368,12 @@ function setupEventListeners() {
     hideError();
     const text = inputText.value.trim();
     if (!text) {
+      sound.playError();
       showError('Please paste or grab study material first.');
       return;
     }
 
+    sound.playPop();
     const { geminiApiKey = '' } = await chrome.storage.local.get('geminiApiKey');
     const selectedStyle = document.querySelector('input[name="card-style"]:checked')?.value || 'balanced';
 
@@ -376,8 +389,10 @@ function setupEventListeners() {
         cardStyle: selectedStyle
       });
       await chrome.storage.local.set({ lastForgedDeck: deck });
+      sound.playChime();
       renderCards(deck);
     } catch (err) {
+      sound.playError();
       showError(err.message);
     } finally {
       loadingState.classList.add('hidden');
@@ -388,6 +403,7 @@ function setupEventListeners() {
   // Add blank card
   btnAddCard.addEventListener('click', () => {
     if (!currentDeckData) return;
+    sound.playPop();
     currentDeckData.cards.push({
       type: 'cloze',
       front: 'Concept {{c1::key fact}} prompt',
@@ -400,6 +416,7 @@ function setupEventListeners() {
   // Push to Anki
   btnPushAnki.addEventListener('click', async () => {
     if (!currentDeckData || currentDeckData.cards.length === 0) return;
+    sound.playPop();
     btnPushAnki.disabled = true;
     btnPushAnki.textContent = 'Pushing...';
 
@@ -408,9 +425,11 @@ function setupEventListeners() {
       const targetDeck = `${defaultDeck}::${currentDeckData.topic.replace(/\s+/g, '_')}`;
 
       const res = await anki.pushCards(targetDeck, currentDeckData.cards);
+      sound.playSuccess();
       showReceipt(`✅ <b>Anki:</b> Added ${res.added} cards (${res.skipped} skipped as duplicates) to <code>${targetDeck}</code>`);
       await checkAnkiStatus();
     } catch (err) {
+      sound.playError();
       showError(err.message);
     } finally {
       btnPushAnki.disabled = false;
@@ -418,27 +437,49 @@ function setupEventListeners() {
     }
   });
 
+  // Download .txt Deck (Native Anki TSV without add-ons)
+  btnDownloadTxt?.addEventListener('click', () => {
+    if (!currentDeckData || currentDeckData.cards.length === 0) return;
+    sound.playPop();
+    const tsvContent = AnkiConnectClient.generateAnkiTsv(currentDeckData.cards, currentDeckData.topic);
+    const blob = new Blob([tsvContent], { type: 'text/tab-separated-values;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const safeTopic = (currentDeckData.topic || 'deck').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    a.download = `deepencode-${safeTopic}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    sound.playSuccess();
+    showReceipt('💾 Downloaded Anki <code>.txt</code> file! Drag into Anki or use File &rarr; Import.');
+  });
+
   // Copy for RemNote
   btnCopyRemnote.addEventListener('click', async () => {
     if (!currentDeckData) return;
+    sound.playPop();
     const remnoteText = formatForRemNote(currentDeckData.cards);
     await navigator.clipboard.writeText(remnoteText);
+    sound.playSuccess();
     showReceipt('📋 <b>RemNote Power Syntax</b> copied to clipboard!');
   });
 
   // Copy raw JSON
   btnCopyJson.addEventListener('click', async () => {
     if (!currentDeckData) return;
+    sound.playPop();
     await navigator.clipboard.writeText(JSON.stringify(currentDeckData, null, 2));
+    sound.playSuccess();
     showReceipt('📑 Copied raw card JSON to clipboard!');
   });
 
   // Open in DeepEncode full app
   btnOpenDeepEncode.addEventListener('click', async () => {
+    sound.playPop();
     const { deepEncodeUrl = 'http://localhost:3000' } = await chrome.storage.local.get('deepEncodeUrl');
     const text = inputText.value.trim();
     const encoded = encodeURIComponent(text);
-    const targetUrl = `${deepEncodeUrl}?source=${encoded}`;
+    const targetUrl = `${deepEncodeUrl}?source=${encoded}&auto=forge`;
     chrome.tabs.create({ url: targetUrl });
   });
 
