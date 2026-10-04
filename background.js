@@ -1,34 +1,35 @@
-// background.js - Encode Companion Service Worker
+// background.js - Encode Companion Service Worker (ES Module)
+import { forgeFlashcards } from './lib/forge.js';
+import { AnkiConnectClient } from './lib/anki.js';
+
+const anki = new AnkiConnectClient();
 
 chrome.runtime.onInstalled.addListener(async () => {
-  // Rule 2: Configure side panel to open when clicking the toolbar icon
   try {
     await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   } catch (err) {
     console.error('Failed to set side panel behavior:', err);
   }
 
-  // Set default settings if not already present
   const existing = await chrome.storage.local.get(['geminiApiKey', 'defaultDeck', 'ankiConnectUrl', 'deepEncodeUrl', 'cardStyle']);
   const defaults = {
     geminiApiKey: existing.geminiApiKey || '',
     defaultDeck: existing.defaultDeck || 'DeepEncode::QuickCapture',
     ankiConnectUrl: existing.ankiConnectUrl || 'http://127.0.0.1:8765',
     deepEncodeUrl: existing.deepEncodeUrl || 'http://localhost:3000',
-    cardStyle: existing.cardStyle || 'balanced' // 'balanced' | 'cloze_only' | 'mechanisms'
+    cardStyle: existing.cardStyle || 'balanced'
   };
   await chrome.storage.local.set(defaults);
 
-  // Setup context menu
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: 'encode-selection',
-      title: 'Encode selection with DeepEncode',
+      title: '⚡ Encode selection with DeepEncode',
       contexts: ['selection']
     });
     chrome.contextMenus.create({
       id: 'encode-page',
-      title: 'Encode this entire page / slide',
+      title: '⚡ Encode this entire page / slide',
       contexts: ['page']
     });
   });
@@ -45,7 +46,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'encode-selection' && info.selectionText) {
     textToCapture = info.selectionText.trim();
   } else if (info.menuItemId === 'encode-page') {
-    // We will ask the active tab to extract content
     try {
       const response = await chrome.tabs.sendMessage(tab.id, { action: 'extract_content' });
       if (response && response.text) {
@@ -53,7 +53,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         captureTitle = response.title || captureTitle;
       }
     } catch {
-      // Content script may not be loaded yet, fallback to selection or page title
       textToCapture = tab.title || '';
     }
   }
@@ -68,7 +67,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       }
     });
 
-    // Open side panel
     try {
       await chrome.sidePanel.open({ windowId: tab.windowId });
     } catch (err) {
@@ -77,7 +75,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 });
 
-// Bridge messages between side panel and active tab or background tasks
+// Handle messages
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     try {
@@ -86,8 +84,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      if (message.action === 'open_sidepanel') {
+        if (sender.tab && sender.tab.windowId) {
+          await chrome.sidePanel.open({ windowId: sender.tab.windowId });
+          sendResponse({ success: true });
+        } else {
+          sendResponse({ success: false, error: 'No active window found' });
+        }
+        return;
+      }
+
       if (message.action === 'anki_request') {
-        // Proxy AnkiConnect request to avoid mixed content or localhost CORS issues
         const { ankiConnectUrl = 'http://127.0.0.1:8765' } = await chrome.storage.local.get('ankiConnectUrl');
         const res = await fetch(ankiConnectUrl, {
           method: 'POST',
@@ -105,11 +112,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
 
-      sendResponse({ status: 'unhandled_action' });
-    } catch (err) {
-      sendResponse({ success: false, error: err.message || String(err) });
-    }
-  })();
+      // 1-Click in-page encode and push action
+      if (message.action === 'quick_encode_and_push') {
+        const { text, title } = message;
+        const config = await chrome.storage.local.get(['geminiApiKey', 'defaultDeck', 'cardStyle']);
+        const apiKey = config.geminiApiKey || '';
+        const defaultDeck = config.defaultDeck || 'DeepEncode::QuickCapture';
+        const cardStyle = config.cardStyle || 'balanced';
 
-  return true; // Keep channel open for async response
-});
+        // 1. Forge cards
+        const deck = await forgeFlashcards({
+          text,
+          sourceTitle: title || 'Quick Capture',
+          apiKey,
+          cardStyle
+        });
+
+        if (!deck || deck.cards.length === 0) {
+          sendResponse({ success: false, error: 'No cards could be forged from this content.' });
+          return;
+        }
+
+        // 2. Push to Anki
+        const targetDeck = `${defaultDeck}::${deck.topic.replace(/\s+/g, '_')}`;\n        const pushResult = await anki.pushCards(targetDeck, deck.cards);\n\n        // Also save to recent storage so side panel shows it\n        await chrome.storage.local.set({ lastForgedDeck: deck });\n\n        sendResponse({\n          success: true,\n          added: pushResult.added,\n          skipped: pushResult.skipped,\n          deck: targetDeck,\n          topic: deck.topic\n        });\n        return;\n      }\n\n      sendResponse({ status: 'unhandled_action' });\n    } catch (err) {\n      console.error('Error in background listener:', err);\n      sendResponse({ success: false, error: err.message || String(err) });\n    }\n  })();\n\n  return true;\n});\n

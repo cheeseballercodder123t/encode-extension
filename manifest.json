@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Encode Companion — 1-Click Slides & Gemini to Anki",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Zero-friction flashcard companion for DeepEncode: Capture Google Slides, Gemini chat, or any webpage into Anki & RemNote.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -13,7 +13,8 @@
     "default_title": "Open Encode Companion"
   },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "side_panel": {
     "default_path": "sidepanel/sidepanel.html"
@@ -22,6 +23,18 @@
     "page": "options/options.html",
     "open_in_tab": false
   },
+  "content_scripts": [
+    {
+      "matches": ["https://gemini.google.com/*"],
+      "js": ["content/gemini.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://docs.google.com/presentation/*"],
+      "js": ["content/google-slides.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "permissions": [
     "sidePanel",
     "storage",
