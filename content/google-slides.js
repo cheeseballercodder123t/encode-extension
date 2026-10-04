@@ -64,6 +64,61 @@ function extractGoogleSlides() {
     }
   });
 
+  // Detect visual diagram presence & spatial labels in SVG / Canvas
+  result.diagramLabels = [];
+  result.hasDiagram = false;
+  try {
+    const activeSvg = document.querySelector('.punch-viewer-svgpage svg, svg.punch-viewer-svgpage-svg, .punch-full-screen-element svg');
+    if (activeSvg) {
+      const paths = activeSvg.querySelectorAll('path, ellipse, polygon, polyline, line');
+      const images = activeSvg.querySelectorAll('image');
+      const rects = activeSvg.querySelectorAll('rect');
+
+      const visualShapeCount = paths.length + images.length + (rects.length > 2 ? rects.length : 0);
+      if (visualShapeCount >= 3 || images.length > 0) {
+        result.hasDiagram = true;
+      }
+
+      const svgRect = activeSvg.getBoundingClientRect ? activeSvg.getBoundingClientRect() : { left: 0, top: 0, width: 800, height: 600 };
+      const svgW = svgRect.width || 800;
+      const svgH = svgRect.height || 600;
+
+      const textNodes = Array.from(activeSvg.querySelectorAll('text, tspan'));
+      const spatialItems = [];
+      const seenTexts = new Set();
+
+      textNodes.forEach(node => {
+        const txt = (node.textContent || '').trim();
+        if (txt && txt.length > 1 && !seenTexts.has(txt)) {
+          seenTexts.add(txt);
+          let posX = 'Center';
+          let posY = 'Middle';
+          try {
+            const b = node.getBoundingClientRect ? node.getBoundingClientRect() : null;
+            if (b) {
+              const relX = (b.left - svgRect.left) / svgW;
+              const relY = (b.top - svgRect.top) / svgH;
+              posX = relX < 0.33 ? 'Left' : relX > 0.66 ? 'Right' : 'Center';
+              posY = relY < 0.33 ? 'Top' : relY > 0.66 ? 'Bottom' : 'Middle';
+            }
+          } catch (err) {}
+          spatialItems.push({
+            text: txt,
+            position: `${posY} ${posX}`.trim()
+          });
+        }
+      });
+
+      const diagramLabels = spatialItems.filter(item => item.text.split(/\s+/).length <= 10);
+      if (diagramLabels.length >= 2) {
+        result.hasDiagram = true;
+        result.diagramLabels = diagramLabels;
+      }
+    }
+  } catch (diagErr) {
+    console.debug('Diagram extraction error:', diagErr);
+  }
+
   let assembled = '';
   if (result.title) assembled += `Presentation: ${result.title}\n`;
   if (result.currentSlideNumber) {
@@ -71,6 +126,10 @@ function extractGoogleSlides() {
   }
   if (result.slideText.length > 0) {
     assembled += '--- Slide Content ---\n' + result.slideText.join('\n') + '\n\n';
+  }
+  if (result.diagramLabels && result.diagramLabels.length > 0) {
+    assembled += '--- Diagram & Spatial Labels ---\n' +
+      result.diagramLabels.map((lbl, idx) => `[Slot ${idx + 1}]: "${lbl.text}" (${lbl.position})`).join('\n') + '\n\n';
   }
   if (result.speakerNotes) {
     assembled += '--- Speaker Notes ---\n' + result.speakerNotes + '\n';

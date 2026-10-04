@@ -67,7 +67,8 @@ function createPng(width, height, colorR, colorG, colorB) {
           rawData[pxOffset + 2] = 11;
           rawData[pxOffset + 3] = 255;
         } else {
-          // Inside: dark background (#0f111a) with stylized gold 'E'\n          const nx = (x - (cx - r * 0.5)) / (r * 1.0);
+          // Inside: dark background (#0f111a) with stylized gold 'E'
+          const nx = (x - (cx - r * 0.5)) / (r * 1.0);
           const ny = (y - (cy - r * 0.6)) / (r * 1.2);
           
           let isE = false;
@@ -111,6 +112,6 @@ function createPng(width, height, colorR, colorG, colorB) {
 
 [16, 32, 48, 128].forEach(size => {
   const png = createPng(size, size);
-  fs.writeFileSync(`icons/icon-${size}.png`, png);
+  fs.writeFileSync(`C:/Users/vinso/.gemini/antigravity/scratch/encode-extension/icons/icon-${size}.png`, png);
   console.log(`Created icon-${size}.png (${png.length} bytes)`);
 });
