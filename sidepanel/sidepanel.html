@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Encode Companion</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Bar -->
+    <header class="header">
+      <div class="brand">
+        <div class="logo-mark">E</div>
+        <div class="brand-text">
+          <span class="brand-title">Encode</span>
+          <span class="brand-sub">Companion</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div id="anki-badge" class="badge badge-offline" title="Checking AnkiConnect...">
+          <span class="badge-dot"></span>
+          <span id="anki-status-text">Anki Offline</span>
+        </div>
+        <button id="btn-settings" class="icon-btn" title="Settings">⚙️</button>
+      </div>
+    </header>
+
+    <!-- Source Capture Toolbar -->
+    <section class="section capture-bar">
+      <div class="section-label">1-CLICK SOURCE CAPTURE</div>
+      <div class="capture-buttons">
+        <button id="btn-grab-context" class="btn btn-secondary capture-btn">
+          <span class="btn-icon">⚡</span>
+          <span id="btn-grab-text">Grab Current Page</span>
+        </button>
+        <button id="btn-grab-selection" class="btn btn-ghost capture-btn" title="Grab highlighted text">
+          <span class="btn-icon">✂️</span> Selection
+        </button>
+      </div>
+      <div id="capture-source-indicator" class="source-indicator hidden">
+        <span id="source-type-pill" class="pill">Page</span>
+        <span id="source-title-display" class="source-title-text"></span>
+      </div>
+    </section>
+
+    <!-- Content Workspace -->
+    <section class="section workbench">
+      <div class="section-label-row">
+        <label for="input-text" class="section-label">STUDY MATERIAL</label>
+        <span id="word-count" class="meta-label">0 words</span>
+      </div>
+      <textarea id="input-text" placeholder="Paste notes, slides, or click 'Grab' above to auto-extract from Google Slides or Gemini..." rows="6"></textarea>
+
+      <div class="forge-controls">
+        <div class="style-selector">
+          <label class="radio-chip">
+            <input type="radio" name="card-style" value="balanced" checked>
+            <span>Balanced</span>
+          </label>
+          <label class="radio-chip">
+            <input type="radio" name="card-style" value="cloze_only">
+            <span>Clozes</span>
+          </label>
+          <label class="radio-chip">
+            <input type="radio" name="card-style" value="mechanisms">
+            <span>Mechanisms</span>
+          </label>
+        </div>
+
+        <button id="btn-forge" class="btn btn-primary forge-btn">
+          <span class="btn-sparkle">✨</span>
+          <span id="btn-forge-text">Forge High-Yield Cards</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Loading State -->
+    <div id="loading-state" class="loading-container hidden">
+      <div class="spinner"></div>
+      <div class="loading-label">Extracting causal mechanisms & clozes...</div>
+      <div class="loading-sub">Applying Wozniak 1-idea & 20-word ceilings</div>
+    </div>
+
+    <!-- Error Banner -->
+    <div id="error-banner" class="banner banner-error hidden">
+      <div id="error-message"></div>
+      <button id="btn-dismiss-error" class="banner-close">✕</button>
+    </div>
+
+    <!-- Success / Receipt Banner -->
+    <div id="receipt-banner" class="banner banner-success hidden">
+      <div id="receipt-message"></div>
+    </div>
+
+    <!-- Generated Cards View -->
+    <section id="results-view" class="section results hidden">
+      <div class="results-header">
+        <div>
+          <h2 id="deck-topic-title" class="deck-title">Topic</h2>
+          <div id="deck-audit-stats" class="audit-stats">0 cards · 0 leeches</div>
+        </div>
+        <div class="results-actions">
+          <button id="btn-open-deepencode" class="btn btn-ghost btn-sm" title="Open in DeepEncode web studio">
+            ↗ Full Studio
+          </button>
+        </div>
+      </div>
+
+      <!-- Export Bar -->
+      <div class="export-bar">
+        <button id="btn-push-anki" class="btn btn-amber export-btn">
+          <span>🚀</span> Push to Anki
+        </button>
+        <button id="btn-copy-remnote" class="btn btn-secondary export-btn">
+          <span>📋</span> RemNote
+        </button>
+        <button id="btn-copy-json" class="btn btn-ghost export-btn" title="Copy Raw Cards">
+          <span>📑</span> Copy
+        </button>
+      </div>
+
+      <!-- Cards List -->
+      <div id="cards-container" class="cards-list"></div>
+    </section>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal-backdrop hidden">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <h3>Extension Settings</h3>
+          <button id="btn-close-settings" class="icon-btn">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="setting-gemini-key">Gemini API Key</label>
+            <input type="password" id="setting-gemini-key" placeholder="AIzaSy...">
+            <small>Used for instant generation. Get a free key at <a href="https://aistudio.google.com/" target="_blank">Google AI Studio</a>.</small>
+          </div>
+
+          <div class="form-group">
+            <label for="setting-default-deck">Default Anki Deck</label>
+            <input type="text" id="setting-default-deck" placeholder="DeepEncode::QuickCapture">
+          </div>
+
+          <div class="form-group">
+            <label for="setting-anki-url">AnkiConnect URL</label>
+            <input type="text" id="setting-anki-url" placeholder="http://127.0.0.1:8765">
+          </div>
+
+          <div class="form-group">
+            <label for="setting-deepencode-url">DeepEncode App URL</label>
+            <input type="text" id="setting-deepencode-url" placeholder="http://localhost:3000">
+            <small>Where to launch full interactive workouts if desired.</small>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="btn-save-settings" class="btn btn-primary">Save Settings</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>
