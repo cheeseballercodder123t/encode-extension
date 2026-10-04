@@ -1,1 +1,321 @@
-// content/google-slides.js\n// Enhanced content script for Google Slides (docs.google.com/presentation/*)\n// Injects floating companion pill: [⚡ 1-Click Anki Slide] and [📚 Encode Presentation]\n\nfunction extractGoogleSlides() {\n  const result = {\n    type: 'google-slides',\n    title: document.title.replace(/ - Google Slides$/, '').trim(),\n    currentSlideNumber: null,\n    totalSlides: null,\n    slideText: [],\n    speakerNotes: '',\n    fullText: ''\n  };\n\n  try {\n    const filmstripThumbs = document.querySelectorAll('.punch-filmstrip-thumbnail');\n    if (filmstripThumbs && filmstripThumbs.length > 0) {\n      result.totalSlides = filmstripThumbs.length;\n      filmstripThumbs.forEach((thumb, idx) => {\n        if (thumb.classList.contains('punch-filmstrip-thumbnail-selected') || thumb.getAttribute('aria-selected') === 'true') {\n          result.currentSlideNumber = idx + 1;\n        }\n      });\n    }\n  } catch (e) {\n    console.debug('Slide count detection error:', e);\n  }\n\n  const activeSlideSvgs = document.querySelectorAll('.punch-viewer-svgpage, .punch-full-screen-element svg, svg.punch-viewer-svgpage-svg');\n  const textsFound = new Set();\n\n  function scanSvg(element) {\n    if (!element) return;\n    const textNodes = element.querySelectorAll('text, tspan');\n    textNodes.forEach(node => {\n      const text = (node.textContent || '').trim();\n      if (text && text.length > 1 && !textsFound.has(text)) {\n        textsFound.add(text);\n        result.slideText.push(text);\n      }\n    });\n  }\n\n  if (activeSlideSvgs.length > 0) {\n    activeSlideSvgs.forEach(svg => scanSvg(svg));\n  } else {\n    document.querySelectorAll('svg text').forEach(t => {\n      const txt = (t.textContent || '').trim();\n      if (txt && !textsFound.has(txt)) {\n        textsFound.add(txt);\n        result.slideText.push(txt);\n      }\n    });\n  }\n\n  const speakerNoteBoxes = document.querySelectorAll(\n    'div[aria-label*=\"Speaker note\" i], div[aria-label*=\"Notes\" i], .punch-notes-text, [role=\"region\"][aria-label*=\"notes\" i]'\n  );\n  speakerNoteBoxes.forEach(box => {\n    const note = (box.innerText || box.textContent || '').trim();\n    if (note && note !== 'Click to add speaker notes') {\n      result.speakerNotes += (result.speakerNotes ? '\\n' : '') + note;\n    }\n  });\n\n  let assembled = '';\n  if (result.title) assembled += `Presentation: ${result.title}\\n`;\n  if (result.currentSlideNumber) {\n    assembled += `Slide ${result.currentSlideNumber}${result.totalSlides ? ' of ' + result.totalSlides : ''}\\n\\n`;\n  }\n  if (result.slideText.length > 0) {\n    assembled += '--- Slide Content ---\\n' + result.slideText.join('\\n') + '\\n\\n';\n  }\n  if (result.speakerNotes) {\n    assembled += '--- Speaker Notes ---\\n' + result.speakerNotes + '\\n';\n  }\n\n  const selection = window.getSelection()?.toString()?.trim();\n  if (selection) {\n    assembled += (assembled ? '\\n--- Selected Text ---\\n' : '') + selection;\n  }\n\n  result.fullText = assembled.trim() || document.title;\n  return result;\n}\n\n// --- Floating Toast Utility ---\nfunction showSlidesToast(message, type = 'success') {\n  let toast = document.getElementById('deepencode-slides-toast');\n  if (!toast) {\n    toast = document.createElement('div');\n    toast.id = 'deepencode-slides-toast';\n    toast.style.cssText = `\n      position: fixed;\n      bottom: 70px;\n      right: 24px;\n      z-index: 999999;\n      background: #0f111a;\n      color: #f8fafc;\n      border: 1px solid ${type === 'error' ? '#ef4444' : '#f59e0b'};\n      box-shadow: 0 6px 24px rgba(0,0,0,0.5), 0 0 12px rgba(245,158,11,0.25);\n      padding: 12px 18px;\n      border-radius: 8px;\n      font-size: 13px;\n      font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif;\n      transition: all 0.25s ease;\n      display: flex;\n      align-items: center;\n      gap: 10px;\n      max-width: 400px;\n    `;\n    document.body.appendChild(toast);\n  }\n\n  toast.innerHTML = `<span>${type === 'error' ? '⚠️' : '⚡'}</span> <div>${message}</div>`;\n  toast.style.opacity = '1';\n  toast.style.transform = 'translateY(0)';\n\n  setTimeout(() => {\n    toast.style.opacity = '0';\n    toast.style.transform = 'translateY(10px)';\n    setTimeout(() => toast.remove(), 300);\n  }, 4000);\n}\n\n// --- Floating Slides Overlay Widget ---\nfunction injectSlidesCompanionWidget() {\n  if (document.getElementById('deepencode-slides-companion')) return;\n\n  const widget = document.createElement('div');\n  widget.id = 'deepencode-slides-companion';\n  widget.style.cssText = `\n    position: fixed;\n    bottom: 20px;\n    right: 24px;\n    z-index: 999998;\n    background: #0f111a;\n    border: 1px solid rgba(245, 158, 11, 0.4);\n    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 12px rgba(245, 158, 11, 0.15);\n    border-radius: 30px;\n    padding: 6px 12px;\n    display: flex;\n    align-items: center;\n    gap: 8px;\n    font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif;\n    user-select: none;\n    transition: all 0.2s ease;\n  `;\n\n  // Encode Current Slide Button\n  const btnSlide = document.createElement('button');\n  btnSlide.innerHTML = '⚡ <b>Encode Slide to Anki</b>';\n  btnSlide.title = 'Instantly extract this slide and add atomic flashcards to Anki (Alt+S)';\n  btnSlide.style.cssText = `\n    background: #f59e0b;\n    color: #07080d;\n    border: none;\n    padding: 6px 12px;\n    border-radius: 20px;\n    font-size: 12px;\n    font-weight: 700;\n    cursor: pointer;\n    transition: all 0.15s ease;\n  `;\n  btnSlide.addEventListener('mouseenter', () => {\n    btnSlide.style.background = '#d97706';\n    btnSlide.style.boxShadow = '0 0 10px rgba(245, 158, 11, 0.4)';\n  });\n  btnSlide.addEventListener('mouseleave', () => {\n    btnSlide.style.background = '#f59e0b';\n    btnSlide.style.boxShadow = 'none';\n  });\n\n  btnSlide.addEventListener('click', async () => {\n    const data = extractGoogleSlides();\n    if (!data.fullText || data.fullText.length < 15) {\n      showSlidesToast('No text detected on the active slide. Select text or ensure slide contains content.', 'error');\n      return;\n    }\n\n    btnSlide.disabled = true;\n    btnSlide.innerHTML = '⏳ <b>Forging...</b>';\n\n    chrome.runtime.sendMessage({\n      action: 'quick_encode_and_push',\n      text: data.fullText,\n      title: `${data.title} - Slide ${data.currentSlideNumber || ''}`\n    }, response => {\n      btnSlide.disabled = false;\n      btnSlide.innerHTML = '⚡ <b>Encode Slide to Anki</b>';\n\n      if (response && response.success) {\n        showSlidesToast(`Added <b>${response.added} cards</b> to <code>${response.deck}</code> (${response.skipped} duplicates skipped).`);\n      } else {\n        showSlidesToast(`Failed: ${response?.error || 'Make sure Anki is running with AnkiConnect.'}`, 'error');\n      }\n    });\n  });\n\n  // Open Side Panel Button\n  const btnOpen = document.createElement('button');\n  btnOpen.textContent = '📖 Sidebar';\n  btnOpen.title = 'Open Encode Companion side panel';\n  btnOpen.style.cssText = `\n    background: transparent;\n    color: #94a3b8;\n    border: 1px solid rgba(255, 255, 255, 0.1);\n    padding: 6px 10px;\n    border-radius: 20px;\n    font-size: 11px;\n    font-weight: 600;\n    cursor: pointer;\n  `;\n  btnOpen.addEventListener('click', () => {\n    chrome.runtime.sendMessage({ action: 'open_sidepanel' });\n  });\n\n  widget.appendChild(btnSlide);\n  widget.appendChild(btnOpen);\n  document.body.appendChild(widget);\n}\n\n// Keyboard shortcut: Alt+S to encode slide\nwindow.addEventListener('keydown', (e) => {\n  if (e.altKey && (e.key === 's' || e.key === 'S')) {\n    e.preventDefault();\n    const btn = document.querySelector('#deepencode-slides-companion button');\n    if (btn) btn.click();\n  }\n});\n\nsetTimeout(injectSlidesCompanionWidget, 1500);\n\n// Listen for extractor requests\nchrome.runtime.onMessage.addListener((message, sender, sendResponse) => {\n  if (message.action === 'extract_content' || message.action === 'extract_google_slides') {\n    const data = extractGoogleSlides();\n    sendResponse({ success: true, ...data, text: data.fullText });\n  }\n  return true;\n});\n
+// content/google-slides.js
+// Enhanced content script for Google Slides (docs.google.com/presentation/*)
+// Injects floating companion pill: [⚡ Encode Slide (Alt+S)], [📥 DeepEncode Web], and [📖 Sidebar]
+
+function extractGoogleSlides() {
+  const result = {
+    type: 'google-slides',
+    title: document.title.replace(/ - Google Slides$/, '').trim(),
+    currentSlideNumber: null,
+    totalSlides: null,
+    slideText: [],
+    speakerNotes: '',
+    fullText: ''
+  };
+
+  try {
+    const filmstripThumbs = document.querySelectorAll('.punch-filmstrip-thumbnail');
+    if (filmstripThumbs && filmstripThumbs.length > 0) {
+      result.totalSlides = filmstripThumbs.length;
+      filmstripThumbs.forEach((thumb, idx) => {
+        if (thumb.classList.contains('punch-filmstrip-thumbnail-selected') || thumb.getAttribute('aria-selected') === 'true') {
+          result.currentSlideNumber = idx + 1;
+        }
+      });
+    }
+  } catch (e) {
+    console.debug('Slide count detection error:', e);
+  }
+
+  const activeSlideSvgs = document.querySelectorAll('.punch-viewer-svgpage, .punch-full-screen-element svg, svg.punch-viewer-svgpage-svg');
+  const textsFound = new Set();
+
+  function scanSvg(element) {
+    if (!element) return;
+    const textNodes = element.querySelectorAll('text, tspan');
+    textNodes.forEach(node => {
+      const text = (node.textContent || '').trim();
+      if (text && text.length > 1 && !textsFound.has(text)) {
+        textsFound.add(text);
+        result.slideText.push(text);
+      }
+    });
+  }
+
+  if (activeSlideSvgs.length > 0) {
+    activeSlideSvgs.forEach(svg => scanSvg(svg));
+  } else {
+    document.querySelectorAll('svg text').forEach(t => {
+      const txt = (t.textContent || '').trim();
+      if (txt && !textsFound.has(txt)) {
+        textsFound.add(txt);
+        result.slideText.push(txt);
+      }
+    });
+  }
+
+  const speakerNoteBoxes = document.querySelectorAll(
+    'div[aria-label*="Speaker note" i], div[aria-label*="Notes" i], .punch-notes-text, [role="region"][aria-label*="notes" i]'
+  );
+  speakerNoteBoxes.forEach(box => {
+    const note = (box.innerText || box.textContent || '').trim();
+    if (note && note !== 'Click to add speaker notes') {
+      result.speakerNotes += (result.speakerNotes ? '\n' : '') + note;
+    }
+  });
+
+  let assembled = '';
+  if (result.title) assembled += `Presentation: ${result.title}\n`;
+  if (result.currentSlideNumber) {
+    assembled += `Slide ${result.currentSlideNumber}${result.totalSlides ? ' of ' + result.totalSlides : ''}\n\n`;
+  }
+  if (result.slideText.length > 0) {
+    assembled += '--- Slide Content ---\n' + result.slideText.join('\n') + '\n\n';
+  }
+  if (result.speakerNotes) {
+    assembled += '--- Speaker Notes ---\n' + result.speakerNotes + '\n';
+  }
+
+  const selection = window.getSelection()?.toString()?.trim();
+  if (selection) {
+    assembled += (assembled ? '\n--- Selected Text ---\n' : '') + selection;
+  }
+
+  result.fullText = assembled.trim() || document.title;
+  return result;
+}
+
+// --- Floating Toast Utility ---
+function showSlidesToast(message, type = 'success', actionText = null, onAction = null) {
+  let toast = document.getElementById('deepencode-slides-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'deepencode-slides-toast';
+    toast.style.cssText = `
+      position: fixed;
+      bottom: 74px;
+      right: 24px;
+      z-index: 999999;
+      background: #0f111a;
+      color: #f8fafc;
+      border: 1px solid ${type === 'error' ? '#ef4444' : '#f59e0b'};
+      box-shadow: 0 6px 24px rgba(0,0,0,0.5), 0 0 12px rgba(245,158,11,0.25);
+      padding: 12px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      transition: all 0.25s ease;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      max-width: 420px;
+    `;
+    document.body.appendChild(toast);
+  }
+
+  toast.innerHTML = '';
+  const icon = document.createElement('span');
+  icon.textContent = type === 'error' ? '⚠️' : '⚡';
+  toast.appendChild(icon);
+
+  const textDiv = document.createElement('div');
+  textDiv.innerHTML = message;
+  textDiv.style.flex = '1';
+  toast.appendChild(textDiv);
+
+  if (actionText && onAction) {
+    const actBtn = document.createElement('button');
+    actBtn.textContent = actionText;
+    actBtn.style.cssText = `
+      background: #f59e0b;
+      color: #07080d;
+      border: none;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    `;
+    actBtn.addEventListener('click', () => {
+      onAction();
+      toast.remove();
+    });
+    toast.appendChild(actBtn);
+  }
+
+  toast.style.opacity = '1';
+  toast.style.transform = 'translateY(0)';
+
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateY(10px)';
+    setTimeout(() => toast.remove(), 300);
+  }, 4500);
+}
+
+// --- Floating Slides Overlay Companion Widget ---
+function injectSlidesCompanionWidget() {
+  if (document.getElementById('deepencode-slides-companion')) return;
+
+  const widget = document.createElement('div');
+  widget.id = 'deepencode-slides-companion';
+  widget.style.cssText = `
+    position: fixed;
+    bottom: 20px;
+    right: 24px;
+    z-index: 999998;
+    background: #0f111a;
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 12px rgba(245, 158, 11, 0.15);
+    border-radius: 30px;
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    user-select: none;
+    transition: all 0.2s ease;
+  `;
+
+  // 1. Encode Slide Button (Alt+S)
+  const btnSlide = document.createElement('button');
+  btnSlide.innerHTML = '⚡ <b>Encode Slide to Anki</b>';
+  btnSlide.title = 'Instantly extract this slide and add atomic flashcards to Anki (Shortcut: Alt+S)';
+  btnSlide.style.cssText = `
+    background: #f59e0b;
+    color: #07080d;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  `;
+  btnSlide.addEventListener('mouseenter', () => {
+    btnSlide.style.background = '#d97706';
+    btnSlide.style.boxShadow = '0 0 10px rgba(245, 158, 11, 0.4)';
+  });
+  btnSlide.addEventListener('mouseleave', () => {
+    btnSlide.style.background = '#f59e0b';
+    btnSlide.style.boxShadow = 'none';
+  });
+
+  btnSlide.addEventListener('click', async () => {
+    const data = extractGoogleSlides();
+    if (!data.fullText || data.fullText.length < 15) {
+      showSlidesToast('No text detected on the active slide. Select text or ensure slide contains content.', 'error');
+      return;
+    }
+
+    btnSlide.disabled = true;
+    btnSlide.innerHTML = '⏳ <b>Forging...</b>';
+
+    chrome.runtime.sendMessage({
+      action: 'quick_encode_and_push',
+      text: data.fullText,
+      title: `${data.title} - Slide ${data.currentSlideNumber || ''}`
+    }, response => {
+      btnSlide.disabled = false;
+      btnSlide.innerHTML = '⚡ <b>Encode Slide to Anki</b>';
+
+      if (response && response.success) {
+        if (response.ankiOffline) {
+          showSlidesToast(
+            `Forged <b>${response.cardCount} cards</b>! Saved in sidebar (open Anki to push).`,
+            'success',
+            'Open Sidebar',
+            () => chrome.runtime.sendMessage({ action: 'open_sidepanel' })
+          );
+        } else {
+          showSlidesToast(
+            `Added <b>${response.added} cards</b> to <code>${response.deck}</code> (${response.skipped} duplicates skipped).`,
+            'success',
+            'Open Sidebar',
+            () => chrome.runtime.sendMessage({ action: 'open_sidepanel' })
+          );
+        }
+      } else {
+        showSlidesToast(
+          `Failed: ${response?.error || 'Check extension settings'}`,
+          'error',
+          'Settings',
+          () => chrome.runtime.sendMessage({ action: 'open_sidepanel' })
+        );
+      }
+    });
+  });
+
+  // 2. Open in DeepEncode Web Button
+  const btnWeb = document.createElement('button');
+  btnWeb.innerHTML = '📥 DeepEncode';
+  btnWeb.title = 'Open this slide in DeepEncode Full Web App';
+  btnWeb.style.cssText = `
+    background: rgba(255, 255, 255, 0.06);
+    color: #e2e8f0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 6px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  `;
+  btnWeb.addEventListener('mouseenter', () => {
+    btnWeb.style.background = 'rgba(255, 255, 255, 0.15)';
+  });
+  btnWeb.addEventListener('mouseleave', () => {
+    btnWeb.style.background = 'rgba(255, 255, 255, 0.06)';
+  });
+  btnWeb.addEventListener('click', () => {
+    const data = extractGoogleSlides();
+    chrome.runtime.sendMessage({
+      action: 'open_deepencode',
+      text: data.fullText,
+      auto: 'forge'
+    });
+  });
+
+  // 3. Open Sidebar Button
+  const btnOpen = document.createElement('button');
+  btnOpen.textContent = '📖 Sidebar';
+  btnOpen.title = 'Open Encode Companion side panel';
+  btnOpen.style.cssText = `
+    background: transparent;
+    color: #94a3b8;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 6px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  `;
+  btnOpen.addEventListener('click', () => {
+    chrome.runtime.sendMessage({ action: 'open_sidepanel' });
+  });
+
+  widget.appendChild(btnSlide);
+  widget.appendChild(btnWeb);
+  widget.appendChild(btnOpen);
+  document.body.appendChild(widget);
+}
+
+// Keyboard shortcut: Alt+S to encode slide
+window.addEventListener('keydown', (e) => {
+  if (e.altKey && (e.key === 's' || e.key === 'S')) {
+    e.preventDefault();
+    const btn = document.querySelector('#deepencode-slides-companion button');
+    if (btn) btn.click();
+  }
+});
+
+setTimeout(injectSlidesCompanionWidget, 1500);
+
+// Listen for extractor requests
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'extract_content' || message.action === 'extract_google_slides') {
+    const data = extractGoogleSlides();
+    sendResponse({ success: true, ...data, text: data.fullText });
+  }
+  return true;
+});
